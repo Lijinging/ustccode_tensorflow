@@ -92,8 +92,6 @@ for i in range(3000):
     batch = next_batch(train_data, train_label, i * size, size)
     train_step.run(feed_dict={x: batch[0], y_: batch[1], keep_prob: 0.5})
     if i % 100 == 0:
-        train_accuracy = accuracy.eval(feed_dict={
-            x: batch[0], y_: batch[1], keep_prob: 1.0})
         print(i, end=":")
         print("test accuracy %g" % accuracy.eval(feed_dict={
             x: test_data, y_: test_label, keep_prob: 1.0}))
