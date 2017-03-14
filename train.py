@@ -1,105 +1,135 @@
 # coding:utf-8
-import tensorflow as tf
-import scipy.io as scio
+
+from model import *
+
+import scipy.io
+import scipy.misc
 import numpy as np
 
-'''
-设置输入数据
-'''
-train_data_raw = scio.loadmat("data/dataTrain.mat")
-test_data_raw = scio.loadmat("data/dataTest.mat")
-# 数据归一化
-train_data = train_data_raw['data'].astype('float32') / 255.0
-test_data = test_data_raw['data'].astype('float32') / 255.0
-# label:
-train_label = np.zeros((train_data.shape[0], 32))
-test_label = np.zeros((test_data.shape[0], 32))
-train_label[np.array(range(train_data_raw['label'].shape[0])), train_data_raw['label'][:, 0]] = 1
-test_label[np.array(range(test_data_raw['label'].shape[0])), test_data_raw['label'][:, 0]] = 1
+
+def OneHot(X, n=None, negative_class=0.):
+    X = np.asarray(X).flatten()
+    if n is None:
+        n = np.max(X) + 1
+    Xoh = np.ones((len(X), n)) * negative_class
+    Xoh[np.arange(len(X)), X] = 1.
+    return Xoh
 
 
-def weight_variable(shape):
-    initial = tf.truncated_normal(shape, stddev=0.1)
-    return tf.Variable(initial)
+def save_visualization(X, nh_nw, save_path='./vis/sample.jpg'):
+    h,w = X.shape[1], X.shape[2]
+    img = np.zeros((h * nh_nw[0], w * nh_nw[1], 3))
+
+    for n,x in enumerate(X):
+        j = n // nh_nw[1]
+        i = n % nh_nw[1]
+        img[j*h:j*h+h, i*w:i*w+w, :] = x
+
+    scipy.misc.imsave(save_path, img)
 
 
-def bias_variable(shape):
-    initial = tf.constant(0.1, shape=shape)
-    return tf.Variable(initial)
+n_epochs = 100
+learning_rate = 0.0002
+batch_size = 128
+image_shape = [20, 20, 1]
+dim_z = 100
+dim_W1 = 1024
+dim_W2 = 128
+dim_W3 = 64
+dim_channel = 1
 
+visualize_dim = 196
 
-def conv2d(x, W):
-    return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='VALID')
+train = scipy.io.loadmat("data/dataTrain.mat")
+train_data = train['data']
+train_label = train['label']
 
+dcgan_model = DCGAN(
+    batch_size=batch_size,
+    image_shape=image_shape,
+    dim_z=dim_z,
+    dim_W1=dim_W1,
+    dim_W2=dim_W2,
+    dim_W3=dim_W3,
+)
 
-def max_pool_2x2(x):
-    return tf.nn.max_pool(x, ksize=[1, 2, 2, 1],
-                          strides=[1, 2, 2, 1], padding='VALID')
-
-
+Z_tf, Y_tf, image_tf, d_cost_tf, g_cost_tf, p_real, p_gen = dcgan_model.build_model()
 sess = tf.InteractiveSession()
+saver = tf.train.Saver(max_to_keep=10)
 
-x = tf.placeholder(tf.float32, shape=[None, 400])
-y_ = tf.placeholder(tf.float32, shape=[None, 32])
+discrim_vars = filter(lambda x: x.name.startswith('discrim'), tf.trainable_variables())
+gen_vars = filter(lambda x: x.name.startswith('gen'), tf.trainable_variables())
+discrim_vars = [i for i in discrim_vars]
+gen_vars = [i for i in gen_vars]
 
-x_image = tf.reshape(x, [-1, 20, 20, 1])
+train_op_discrim = tf.train.AdamOptimizer(learning_rate, beta1=0.5).minimize(d_cost_tf, var_list=discrim_vars)
+train_op_gen = tf.train.AdamOptimizer(learning_rate, beta1=0.5).minimize(g_cost_tf, var_list=gen_vars)
 
-W_conv1 = weight_variable([5, 5, 1, 20])  # 第一层卷积层
-b_conv1 = bias_variable([20])  # 第一层卷积层的偏置量
-h_conv1 = tf.nn.relu(conv2d(x_image, W_conv1) + b_conv1)
-h_pool1 = max_pool_2x2(h_conv1)  # 第一次池化层
+Z_tf_sample, Y_tf_sample, image_tf_sample = dcgan_model.samples_generator(batch_size=visualize_dim)
 
-W_conv2 = weight_variable([5, 5, 20, 50])  # 第二次卷积层
-b_conv2 = bias_variable([50])  # 第二层卷积层的偏置量
-h_conv2 = tf.nn.relu(conv2d(h_pool1, W_conv2) + b_conv2)
-h_pool2 = max_pool_2x2(h_conv2)  # 第二曾池化层
+tf.initialize_all_variables().run()
 
-W_fc1 = weight_variable([2 * 2 * 50, 500])  # 全连接层
-b_fc1 = bias_variable([500])  # 偏置量
-h_pool2_flat = tf.reshape(h_pool2, [-1, 2 * 2 * 50])
-h_fc1 = tf.nn.relu(tf.matmul(h_pool2_flat, W_fc1) + b_fc1)
+Z_np_sample = np.random.uniform(-1, 1, size=(visualize_dim, dim_z))
+Y_np_sample = OneHot(np.random.randint(32, size=[visualize_dim]), 32)
+iterations = 0
+k = 2
 
-keep_prob = tf.placeholder("float")
-h_fc1_drop = tf.nn.dropout(h_fc1, keep_prob)
+for epoch in range(n_epochs):
+    index = np.arange(len(train_label))
+    np.random.shuffle(index)  # 打乱顺序
+    trX = train_data[index]
+    trY = train_label[index]
 
-W_fc2 = weight_variable([500, 32])
-b_fc2 = bias_variable([32])
-y = tf.nn.softmax(tf.matmul(h_fc1_drop, W_fc2) + b_fc2)
+    for start, end in zip(
+            range(0, len(trY), batch_size),
+            range(batch_size, len(trY), batch_size)
+    ):
 
-cross_entropy = -tf.reduce_sum(y_ * tf.log(y))
-train_step = tf.train.AdamOptimizer(1e-4).minimize(cross_entropy)
-correct_prediction = tf.equal(tf.argmax(y, 1), tf.argmax(y_, 1))
-accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
-sess.run(tf.global_variables_initializer())
+        Xs = trX[start:end].reshape([-1, 20, 20, 1]) / 255.
+        Ys = OneHot(trY[start:end], 32)
+        Zs = np.random.uniform(-1, 1, size=[batch_size, dim_z]).astype(np.float32)
 
+        if np.mod(iterations, k) != 0:
+            _, gen_loss_val = sess.run(
+                [train_op_gen, g_cost_tf],
+                feed_dict={
+                    Z_tf: Zs,
+                    Y_tf: Ys
+                })
+            #    discrim_loss_val, p_real_val, p_gen_val = sess.run([d_cost_tf,p_real,p_gen], feed_dict={Z_tf:Zs, image_tf:Xs, Y_tf:Ys})
+            print("=========== updating G ==========")
+            print("iteration:", iterations)
+            print("gen loss:", gen_loss_val)
+            print("discrim loss:", discrim_loss_val)
 
+        else:
+            _, discrim_loss_val = sess.run(
+                [train_op_discrim, d_cost_tf],
+                feed_dict={
+                    Z_tf: Zs,
+                    Y_tf: Ys,
+                    image_tf: Xs
+                })
+            #    gen_loss_val, p_real_val, p_gen_val = sess.run([g_cost_tf, p_real, p_gen], feed_dict={Z_tf:Zs, image_tf:Xs, Y_tf:Ys})
+            print("=========== updating D ==========")
+            print("iteration:", iterations)
+            #    print("gen loss:", gen_loss_val)
+            print("discrim loss:", discrim_loss_val)
 
-def next_batch(data, label, begin, length):
-    if begin >= data.shape[0]:
-        begin = begin % data.shape[0]
-    if begin + length > data.shape[0]:
-        add = next_batch(data, label, 0, length - (data.shape[0] - begin))
-        add[0] = np.row_stack((data[begin:], add[0]))
-        add[1] = np.row_stack((label[begin:], add[1]))
-    else:
-        add = [data[begin:begin + length], label[begin:begin + length]]
-    return add
+            #    print("Average P(real)=", p_real_val.mean())
+            #    print("Average P(gen)=", p_gen_val.mean())
 
+        step = 10
+        if np.mod(iterations, step) == 0:
+            generated_samples = sess.run(
+                image_tf_sample,
+                feed_dict={
+                    Z_tf_sample: Z_np_sample,
+                    Y_tf_sample: Y_np_sample
+                })
+            generated_samples = (generated_samples + 1.) / 2.
+            save_visualization(generated_samples, (14, 14),
+                               save_path='./vis/sample_%04d' % int(iterations / step) + '.jpg')
 
-for i in range(3000):
-    size = 100
-    # batch = mnist.train.next_batch(100)
-    batch = next_batch(train_data, train_label, i * size, size)
-    train_step.run(feed_dict={x: batch[0], y_: batch[1], keep_prob: 0.5})
-    if i % 100 == 0:
-        print(i, end=":")
-        print("test accuracy %g" % accuracy.eval(feed_dict={
-            x: test_data, y_: test_label, keep_prob: 1.0}))
+        iterations += 1
 
-
-saver = tf.train.Saver()
-save_path = r"C:\Users\lijin\PycharmProjects\ustccode_tensorflow\model\model.ckpt"
-saver.save(sess, save_path)
-
-
-sess.close()
