@@ -15,7 +15,7 @@ dim_w2 = 128
 dim_w3 = 64
 dim_channel = 1
 
-visualize_size = 32
+visualize_size = 8
 visualize_dim = visualize_size * visualize_size
 
 train_raw = scipy.io.loadmat("data/dataTrain.mat")
@@ -46,11 +46,11 @@ z_tf_sample, y_tf_sample, image_tf_sample = dcgan_model.samples_generator(batch_
 
 tf.global_variables_initializer().run()
 Z_np_sample = np.random.uniform(-1, 1, size=(visualize_dim, dim_z))
-Y_np_sample = OneHot(np.array([i for i in range(32) for j in range(visualize_size)]), visualize_size)
+#Y_np_sample = OneHot(np.array([i for i in range(32) for j in range(visualize_size)]), visualize_size)
+Y_np_sample = OneHot(np.array([i//2 for i in range(64)]), 32)
 
 iterations = 0
 k = 2
-step = 10
 
 for epoch in range(n_epochs):
     index = np.arange(len(train_label))
@@ -93,7 +93,7 @@ for epoch in range(n_epochs):
         if iterations < 500:
             step = 10.
         else:
-            step = 100.
+            step = 50.
         if np.mod(iterations, step) == 0:
             generated_samples = sess.run(
                 image_tf_sample,
@@ -103,6 +103,6 @@ for epoch in range(n_epochs):
                 })
             generated_samples = (generated_samples + 1.) / 2.
             save_visualization(generated_samples, (visualize_size, visualize_size),
-                               save_path='./vis/sample_%04d' % int(iterations / step) + '.jpg')
+                               save_path='./vis/sample_%04d' % int(iterations / 10) + '.jpg')
 
         iterations += 1

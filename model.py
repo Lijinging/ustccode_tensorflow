@@ -122,7 +122,8 @@ class DCGAN():
         h2 = lrelu(batchnormalize(tf.nn.conv2d(h1, self.discrim_w2, strides=[1, 2, 2, 1], padding='SAME')))
         h3 = tf.reshape(h2, [self.batch_size, -1])
         h4 = lrelu(batchnormalize(tf.matmul(h3, self.discrim_w3)))
-        return h4
+        h5 = tf.nn.sigmoid(tf.matmul(h4, self.discrim_w4))
+        return h5
 
     def generate(self, Z, Y, batchsize):
         yb = tf.reshape(Y, [batchsize, 1, 1, self.dim_y])
