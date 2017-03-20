@@ -1,5 +1,17 @@
-# -*- coding: utf-8 -*-
+# coding:utf-8
+
 import tensorflow as tf
+import numpy as np
+import scipy.misc
+
+
+def OneHot(X, n=None, negative_class=0.):
+    X = np.asarray(X).flatten()
+    if n is None:
+        n = np.max(X) + 1
+    Xoh = np.ones((len(X), n)) * negative_class
+    Xoh[np.arange(len(X)), X] = 1.
+    return Xoh
 
 
 def batchnormalize(X, eps=1e-8, g=None, b=None):
@@ -29,6 +41,18 @@ def batchnormalize(X, eps=1e-8, g=None, b=None):
     return X
 
 
+def save_visualization(X, nh_nw, save_path='./vis/sample.jpg'):
+    h, w = X.shape[1], X.shape[2]
+    img = np.zeros((h * nh_nw[0], w * nh_nw[1], 3))
+
+    for n, x in enumerate(X):
+        j = n // nh_nw[1]
+        i = n % nh_nw[1]
+        img[j * h:j * h + h, i * w:i * w + w, :] = x
+
+    scipy.misc.imsave(save_path, img)
+
+
 def lrelu(X, leak=0.2):
     f1 = 0.5 * (1 + leak)
     f2 = 0.5 * (1 - leak)
@@ -47,47 +71,45 @@ class DCGAN():
             image_shape=[20, 20, 1],
             dim_z=100,
             dim_y=32,
-            dim_W1=1024,
-            dim_W2=128,
-            dim_W3=64,
-            dim_channel=1,
+            dim_w1=1024,
+            dim_w2=128,
+            dim_w3=64,
+            dim_channel=1
     ):
         self.batch_size = batch_size
         self.image_shape = image_shape
         self.dim_z = dim_z
         self.dim_y = dim_y
 
-        self.dim_W1 = dim_W1
-        self.dim_W2 = dim_W2
-        self.dim_W3 = dim_W3
+        self.dim_w1 = dim_w1
+        self.dim_w2 = dim_w2
+        self.dim_w3 = dim_w3
         self.dim_channel = dim_channel
 
-        self.gen_W1 = tf.Variable(tf.random_normal([dim_z + dim_y, dim_W1], stddev=0.02), name='gen_W1')
-        self.gen_W2 = tf.Variable(tf.random_normal([dim_W1 + dim_y, dim_W2 * 5 * 5], stddev=0.02), name='gen_W2')
-        self.gen_W3 = tf.Variable(tf.random_normal([5, 5, dim_W3, dim_W2 + dim_y], stddev=0.02), name='gen_W3')
-        self.gen_W4 = tf.Variable(tf.random_normal([5, 5, dim_channel, dim_W3 + dim_y], stddev=0.02), name='gen_W4')
+        self.gen_w1 = tf.Variable(tf.random_normal([dim_z + dim_y, dim_w1], stddev=0.02), name="gen_w1")
+        self.gen_w2 = tf.Variable(tf.random_normal([dim_w1 + dim_y, dim_w2 * 5 * 5], stddev=0.02), name="gen_w2")
+        self.gen_w3 = tf.Variable(tf.random_normal([5, 5, dim_w3, dim_w2 + dim_y], stddev=0.02), name="gen_w3")
+        self.gen_w4 = tf.Variable(tf.random_normal([5, 5, dim_channel, dim_w3 + dim_y], stddev=0.02), name="gen_w4")
 
-        self.discrim_W1 = tf.Variable(tf.random_normal([5, 5, dim_channel + dim_y, dim_W3], stddev=0.02),
-                                      name='discrim_W1')
-        self.discrim_W2 = tf.Variable(tf.random_normal([5, 5, dim_W3 + dim_y, dim_W2], stddev=0.02), name='discrim_W2')
-        self.discrim_W3 = tf.Variable(tf.random_normal([dim_W2 * 5 * 5 + dim_y, dim_W1], stddev=0.02),
-                                      name='discrim_W3')
-        self.discrim_W4 = tf.Variable(tf.random_normal([dim_W1 + dim_y, 1], stddev=0.02), name='discrim_W4')
+        self.discrim_w1 = tf.Variable(tf.random_normal([5, 5, dim_channel + dim_y, dim_w3], stddev=0.02),
+                                      name="discrim_w1")
+        self.discrim_w2 = tf.Variable(tf.random_normal([5, 5, dim_w3, dim_w2], stddev=0.02), name="discrim_w2")
+        self.discrim_w3 = tf.Variable(tf.random_normal([dim_w2 * 5 * 5, dim_w1], stddev=0.02), name='discrim_w3')
+        self.discrim_w4 = tf.Variable(tf.random_normal([dim_w1, 1], stddev=0.02), name='discrim_w4')
 
     def build_model(self):
         Z = tf.placeholder(tf.float32, [self.batch_size, self.dim_z])
         Y = tf.placeholder(tf.float32, [self.batch_size, self.dim_y])
 
         image_real = tf.placeholder(tf.float32, [self.batch_size] + self.image_shape)
-        h4 = self.generate(Z, Y)
-        image_gen = tf.nn.sigmoid(h4)  # 激活函数
+        image_gen = tf.nn.sigmoid(self.generate(Z, Y, self.batch_size))
         raw_real = self.discriminate(image_real, Y)
         p_real = tf.nn.sigmoid(raw_real)
         raw_gen = self.discriminate(image_gen, Y)
         p_gen = tf.nn.sigmoid(raw_gen)
         discrim_cost_real = bce(raw_real, tf.ones_like(raw_real))
         discrim_cost_gen = bce(raw_gen, tf.zeros_like(raw_gen))
-        discrim_cost = discrim_cost_real + discrim_cost_gen
+        discrim_cost = discrim_cost_gen + discrim_cost_real
 
         gen_cost = bce(raw_gen, tf.ones_like(raw_gen))
 
@@ -95,55 +117,33 @@ class DCGAN():
 
     def discriminate(self, image, Y):
         yb = tf.reshape(Y, tf.stack([self.batch_size, 1, 1, self.dim_y]))
-        X = tf.concat(axis=3, values=[image, yb * tf.ones([self.batch_size, 20, 20, self.dim_y])])
-
-        h1 = lrelu(tf.nn.conv2d(X, self.discrim_W1, strides=[1, 2, 2, 1], padding='SAME'))
-        h1 = tf.concat(axis=3, values=[h1, yb * tf.ones([self.batch_size, 10, 10, self.dim_y])])
-
-        h2 = lrelu(batchnormalize(tf.nn.conv2d(h1, self.discrim_W2, strides=[1, 2, 2, 1], padding='SAME')))
-        h2 = tf.reshape(h2, [self.batch_size, -1])
-        h2 = tf.concat(axis=1, values=[h2, Y])
-
-        h3 = lrelu(batchnormalize(tf.matmul(h2, self.discrim_W3)))
-        h3 = tf.concat(axis=1, values=[h3, Y])
-        return h3
-
-    def generate(self, Z, Y):
-        yb = tf.reshape(Y, [self.batch_size, 1, 1, self.dim_y])
-        Z = tf.concat(axis=1, values=[Z, Y])
-        h1 = tf.nn.relu(batchnormalize(tf.matmul(Z, self.gen_W1)))
-        h1 = tf.concat(axis=1, values=[h1, Y])
-        h2 = tf.nn.relu(batchnormalize(tf.matmul(h1, self.gen_W2)))
-        h2 = tf.reshape(h2, [self.batch_size, 5, 5, self.dim_W2])
-        h2 = tf.concat(axis=3, values=[h2, yb * tf.ones([self.batch_size, 5, 5, self.dim_y])])
-
-        output_shape_l3 = [self.batch_size, 10, 10, self.dim_W3]
-        h3 = tf.nn.conv2d_transpose(h2, self.gen_W3, output_shape=output_shape_l3, strides=[1, 2, 2, 1])
-        h3 = tf.nn.relu(batchnormalize(h3))
-        h3 = tf.concat(axis=3, values=[h3, yb * tf.ones([self.batch_size, 10, 10, self.dim_y])])
-
-        output_shape_l4 = [self.batch_size, 20, 20, self.dim_channel]
-        h4 = tf.nn.conv2d_transpose(h3, self.gen_W4, output_shape=output_shape_l4, strides=[1, 2, 2, 1])
+        x = tf.concat(axis=3, values=[image, yb * tf.ones([self.batch_size, 20, 20, self.dim_y])])
+        h1 = lrelu(tf.nn.conv2d(x, self.discrim_w1, strides=[1, 2, 2, 1], padding='SAME'))
+        h2 = lrelu(batchnormalize(tf.nn.conv2d(h1, self.discrim_w2, strides=[1, 2, 2, 1], padding='SAME')))
+        h3 = tf.reshape(h2, [self.batch_size, -1])
+        h4 = lrelu(batchnormalize(tf.matmul(h3, self.discrim_w3)))
         return h4
+
+    def generate(self, Z, Y, batchsize):
+        yb = tf.reshape(Y, [batchsize, 1, 1, self.dim_y])
+        Z = tf.concat(axis=1, values=[Z, Y])
+        h1 = tf.nn.relu(batchnormalize(tf.matmul(Z, self.gen_w1)))
+        h2 = tf.concat(axis=1, values=[h1, Y])
+        h3 = tf.nn.relu(batchnormalize(tf.matmul(h2, self.gen_w2)))
+        h4 = tf.reshape(h3, [batchsize, 5, 5, self.dim_w2])
+        h5 = tf.concat(axis=3, values=[h4, yb * tf.ones([batchsize, 5, 5, self.dim_y])])
+        h6 = tf.nn.conv2d_transpose(h5, self.gen_w3, output_shape=[batchsize, 10, 10, self.dim_w3],
+                                    strides=[1, 2, 2, 1])
+        h7 = tf.nn.relu(batchnormalize(h6))
+        h8 = tf.concat(axis=3, values=[h7, yb * tf.ones([batchsize, 10, 10, self.dim_y])])
+        h9 = tf.nn.conv2d_transpose(h8, self.gen_w4, output_shape=[batchsize, 20, 20, self.dim_channel],
+                                    strides=[1, 2, 2, 1])
+        return h9
 
     def samples_generator(self, batch_size):
         Z = tf.placeholder(tf.float32, [batch_size, self.dim_z])
         Y = tf.placeholder(tf.float32, [batch_size, self.dim_y])
 
-        yb = tf.reshape(Y, [batch_size, 1, 1, self.dim_y])
-        Z_ = tf.concat(axis=1, values=[Z, Y])
-        h1 = tf.nn.relu(batchnormalize(tf.matmul(Z_, self.gen_W1)))
-        h1 = tf.concat(axis=1, values=[h1, Y])
-        h2 = tf.nn.relu(batchnormalize(tf.matmul(h1, self.gen_W2)))
-        h2 = tf.reshape(h2, [batch_size, 5, 5, self.dim_W2])
-        h2 = tf.concat(axis=3, values=[h2, yb * tf.ones([batch_size, 5, 5, self.dim_y])])
+        X = tf.nn.sigmoid(self.generate(Z, Y, batch_size))
 
-        output_shape_l3 = [batch_size, 10, 10, self.dim_W3]
-        h3 = tf.nn.conv2d_transpose(h2, self.gen_W3, output_shape=output_shape_l3, strides=[1, 2, 2, 1])
-        h3 = tf.nn.relu(batchnormalize(h3))
-        h3 = tf.concat(axis=3, values=[h3, yb * tf.ones([batch_size, 10, 10, self.dim_y])])
-
-        output_shape_l4 = [batch_size, 20, 20, self.dim_channel]
-        h4 = tf.nn.conv2d_transpose(h3, self.gen_W4, output_shape=output_shape_l4, strides=[1, 2, 2, 1])
-        x = tf.nn.sigmoid(h4)
-        return Z, Y, x
+        return Z, Y, X
