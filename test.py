@@ -51,13 +51,13 @@ y = tf.nn.softmax(tf.matmul(h_fc1_drop, W_fc2) + b_fc2)
 
 sess = tf.InteractiveSession()
 saver = tf.train.Saver()
-save_path = r"C:\Users\lijin\PycharmProjects\ustccode_tensorflow\model\model.ckpt"
+save_path = r"model\model.ckpt"
 saver.restore(sess, save_path)
 
 '''
 设置输入数据
 '''
-LABELS = np.array(list("23456789ABCDEFGHJKLMNOPQRSTUVWXYZ"))
+LABELS = np.array(list("23456789ABCDEFGHJKLMNPQRSTUVWXYZ"))
 test_data_raw = scio.loadmat("data/dataTest.mat")
 # 数据归一化
 test_data = test_data_raw['data'][:10].astype('float32') / 255.0
